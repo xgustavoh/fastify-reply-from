@@ -1,20 +1,20 @@
-'use strict'
+"use strict";
 
-const fp = require('fastify-plugin')
-const URL = require('url').URL
-const lru = require('tiny-lru')
-const querystring = require('querystring')
-const Stream = require('stream')
-const buildRequest = require('./lib/request')
+const fp = require("fastify-plugin");
+const URL = require("url").URL;
+const lru = require("tiny-lru");
+const querystring = require("querystring");
+const Stream = require("stream");
+const buildRequest = require("./lib/request");
 const {
   filterPseudoHeaders,
   copyHeaders,
   stripHttp1ConnectionHeaders
-} = require('./lib/utils')
+} = require("./lib/utils");
 
-module.exports = fp(function from (fastify, opts, next) {
-  const cache = lru(opts.cacheURLs || 100)
-  const base = opts.base
+module.exports = fp(function from(fastify, opts, next) {
+  const cache = lru(opts.cacheURLs || 100);
+  const base = opts.base;
   const { request, close } = buildRequest({
     http2: !!opts.http2,
     base,
@@ -24,57 +24,62 @@ module.exports = fp(function from (fastify, opts, next) {
     rejectUnauthorized: opts.rejectUnauthorized,
     sessionTimeout: opts.sessionTimeout,
     undici: opts.undici
-  })
-  fastify.decorateReply('from', function (source, opts) {
-    opts = opts || {}
-    const req = this.request.req
-    const onResponse = opts.onResponse
-    const rewriteHeaders = opts.rewriteHeaders || headersNoOp
-    const rewriteRequestHeaders = opts.rewriteRequestHeaders || requestHeadersNoOp
+  });
+  fastify.decorateReply("from", function(source, opts) {
+    opts = opts || {};
+    const req = this.request.req;
+    const onResponse = opts.onResponse;
+    const rewriteHeaders = opts.rewriteHeaders || headersNoOp;
+    const rewriteRequestHeaders =
+      opts.rewriteRequestHeaders || requestHeadersNoOp;
 
     if (!source) {
-      source = req.url
+      source = req.url;
     }
 
     // we leverage caching to avoid parsing the destination URL
-    const url = cache.get(source) || new URL(source, base)
-    cache.set(source, url)
+    const url = cache.get(source) || new URL(source, base);
+    cache.set(source, url);
 
-    const sourceHttp2 = req.httpVersionMajor === 2
-    var headers = sourceHttp2 ? filterPseudoHeaders(req.headers) : req.headers
-    headers.host = url.hostname
-    const qs = getQueryString(url.search, req.url, opts)
-    var body = ''
+    const sourceHttp2 = req.httpVersionMajor === 2;
+    var headers = sourceHttp2 ? filterPseudoHeaders(req.headers) : req.headers;
+    headers.host = url.hostname;
+    const qs = getQueryString(url.search, req.url, opts);
+    var body = "";
 
     if (opts.body) {
-      if (typeof opts.body.pipe === 'function') {
-        throw new Error('sending a new body as a stream is not supported yet')
+      if (typeof opts.body.pipe === "function") {
+        throw new Error("sending a new body as a stream is not supported yet");
       }
 
       if (opts.contentType) {
-        body = opts.body
+        body = opts.body;
       } else {
-        body = JSON.stringify(opts.body)
-        opts.contentType = 'application/json'
+        body = JSON.stringify(opts.body);
+        opts.contentType = "application/json";
       }
 
-      headers['content-length'] = Buffer.byteLength(body)
-      headers['content-type'] = opts.contentType
+      headers["content-length"] = Buffer.byteLength(body);
+      headers["content-type"] = opts.contentType;
     } else if (this.request.body) {
       if (this.request.body instanceof Stream) {
-        body = this.request.body
+        body = this.request.body;
       } else {
         // Per RFC 7231 §3.1.1.5 if this header is not present we MAY assume application/octet-stream
-        const contentType = req.headers['content-type'] || 'application/octet-stream'
+        const contentType =
+          req.headers["content-type"] || "application/octet-stream";
         // detect if body should be encoded as JSON
         // supporting extended content-type header formats:
         // - https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Type
-        const shouldEncodeJSON = contentType.toLowerCase().indexOf('application/json') === 0
+        const shouldEncodeJSON =
+          contentType.toLowerCase().indexOf("application/json") === 0;
         // transparently support JSON encoding
-        body = shouldEncodeJSON ? JSON.stringify(this.request.body) : this.request.body
+        body = shouldEncodeJSON
+          ? JSON.stringify(this.request.body)
+          : this.request.body;
         // update origin request headers after encoding
-        headers['content-length'] = Buffer.byteLength(body)
-        headers['content-type'] = contentType
+        headers["content-length"] = Buffer.byteLength(body);
+        headers["content-type"] = contentType;
       }
     }
 
@@ -82,82 +87,91 @@ module.exports = fp(function from (fastify, opts, next) {
     // fastify ignore message body when it's a GET or HEAD request
     // when proxy this request, we should reset the content-length to make it a valid http request
     // discussion: https://github.com/fastify/fastify/issues/953
-    if (req.method === 'GET' || req.method === 'HEAD') {
+    if (req.method === "GET" || req.method === "HEAD") {
       // body will be populated here only if opts.body is passed.
       // if we are doing that with a GET or HEAD request is a programmer error
       // and as such we can throw immediately.
       if (body) {
-        throw new Error('Rewriting the body when doing a GET is not allowed')
+        throw new Error("Rewriting the body when doing a GET is not allowed");
       }
-      headers['content-length'] = 0
+      headers["content-length"] = 0;
     }
 
-    req.log.info({ source }, 'fetching from remote server')
+    req.log.info({ source }, "fetching from remote server");
 
-    const requestHeaders = rewriteRequestHeaders(req, headers)
+    const requestHeaders = rewriteRequestHeaders(req, headers);
 
-    request({ method: req.method, url, qs, headers: requestHeaders, body }, (err, res) => {
-      if (err) {
-        this.request.log.warn(err, 'response errored')
-        if (!this.sent) {
-          if (err.code === 'ERR_HTTP2_STREAM_CANCEL') {
-            this.code(503).send(new Error('Service Unavailable'))
-          } else {
-            this.send(err)
+    const _req = request(
+      { method: req.method, url, qs, headers: requestHeaders, body },
+      (err, res) => {
+        if (err) {
+          this.request.log.warn(err, "response errored");
+          if (!this.sent) {
+            if (err.code === "ERR_HTTP2_STREAM_CANCEL") {
+              this.code(503).send(new Error("Service Unavailable"));
+            } else {
+              this.send(err);
+            }
           }
+          return;
         }
-        return
+        this.request.log.info("response received");
+        if (sourceHttp2) {
+          copyHeaders(
+            rewriteHeaders(stripHttp1ConnectionHeaders(res.headers)),
+            this
+          );
+        } else {
+          copyHeaders(rewriteHeaders(res.headers), this);
+        }
+        this.code(res.statusCode);
+        if (onResponse) {
+          onResponse(this.request.req, this, res.stream);
+        } else {
+          this.send(res.stream);
+        }
       }
-      this.request.log.info('response received')
-      if (sourceHttp2) {
-        copyHeaders(
-          rewriteHeaders(stripHttp1ConnectionHeaders(res.headers)),
-          this
-        )
-      } else {
-        copyHeaders(rewriteHeaders(res.headers), this)
-      }
-      this.code(res.statusCode)
-      if (onResponse) {
-        onResponse(this.request.req, this, res.stream)
-      } else {
-        this.send(res.stream)
-      }
-    })
-  })
+    );
+
+    if (_req !== null) {
+      eos(this.res, err => {
+        _req.abort();
+      });
+    }
+  });
 
   fastify.onClose((fastify, next) => {
-    close()
+    close();
     // let the event loop do a full run so that it can
     // actually destroy those sockets
-    setImmediate(next)
-  })
+    setImmediate(next);
+  });
 
-  next()
-}, '>= 1.3.0')
+  next();
+}, ">= 1.3.0");
 
-function getQueryString (search, reqUrl, opts) {
+function getQueryString(search, reqUrl, opts) {
   if (opts.queryString) {
-    return '?' + querystring.stringify(opts.queryString)
+    return "?" + querystring.stringify(opts.queryString);
   }
 
   if (search.length > 0) {
-    return search
+    return search;
   }
 
-  const queryIndex = reqUrl.indexOf('?')
+  const queryIndex = reqUrl.indexOf("?");
 
   if (queryIndex > 0) {
-    return reqUrl.slice(queryIndex)
+    return reqUrl.slice(queryIndex);
   }
 
-  return ''
+  return "";
 }
 
-function headersNoOp (headers) {
-  return headers
+function headersNoOp(headers) {
+  return headers;
 }
 
-function requestHeadersNoOp (originalReq, headers) {
-  return headers
+function requestHeadersNoOp(originalReq, headers) {
+  return headers;
 }
