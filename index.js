@@ -5,6 +5,7 @@ const URL = require("url").URL;
 const lru = require("tiny-lru");
 const querystring = require("querystring");
 const Stream = require("stream");
+const eos = require("end-of-stream");
 const buildRequest = require("./lib/request");
 const {
   filterPseudoHeaders,
