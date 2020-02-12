@@ -35,7 +35,7 @@ declare module "fastify" {
         queryString?: { [key: string]: unknown };
         contentType?: string;
         onResponse?: (
-          request: FastifyRequest,
+          request: fastify.FastifyRequest,
           reply: FastifyReply<HttpResponse>,
           res: unknown
         ) => void;
